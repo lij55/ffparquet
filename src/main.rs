@@ -1,5 +1,5 @@
 use arrow::datatypes::SchemaRef;
-use arrow_array::RecordBatch;
+use arrow_array::{RecordBatch, RecordBatchReader};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::arrow_writer::ArrowWriter;
 use parquet::arrow::parquet_to_arrow_schema;
@@ -16,7 +16,7 @@ use std::time::Duration;
 use clap::Parser;
 use std::fmt::Display;
 
-use std::ops::Deref;
+use std::ops::{Deref, Index};
 use std::{sync::mpsc, sync::Arc, sync::Mutex, thread};
 
 use env_logger;
@@ -24,10 +24,10 @@ use log::{debug, error, info, warn};
 use std::env;
 const ERR_LOCK: &str = "cant acquire resource";
 
-fn build_parquet_file_writer2(path_str: &str, schema: SchemaRef) -> Option<ArrowWriter<File>> {
+fn build_parquet_file_writer2(path_str: &str, schema: SchemaRef, max_rows_per_group: usize) -> Option<ArrowWriter<File>> {
     let file = File::create(path_str).ok()?;
     let props = WriterProperties::builder()
-        .set_max_row_group_size(1024 * 1024)
+        .set_max_row_group_size(max_rows_per_group)
         .set_compression(Compression::ZSTD(ZstdLevel::default()))
         .set_created_by("ffparquet".into())
         .set_statistics_enabled(EnabledStatistics::Chunk)
@@ -36,19 +36,6 @@ fn build_parquet_file_writer2(path_str: &str, schema: SchemaRef) -> Option<Arrow
     Some(writer)
 }
 
-fn open_file<P: AsRef<Path>>(file_name: P) -> File {
-    let file_name = file_name.as_ref();
-    let path = Path::new(file_name);
-    let file = File::open(path);
-
-    file.unwrap()
-}
-
-/*
-1个reader，message发给线程池
-根据总行数，计算文件总个数
-参数确定线程个数
- */
 
 #[derive(clap::ValueEnum, PartialEq, Default, Clone, Debug)]
 enum CompressionType {
@@ -56,6 +43,7 @@ enum CompressionType {
     #[default]
     Zstd,
     Snapy,
+    LZ4,
     Gzip,
 }
 
@@ -66,6 +54,7 @@ impl Display for CompressionType {
             CompressionType::Zstd => write!(f, "zstd"),
             CompressionType::Snapy => write!(f, "snapy"),
             CompressionType::Gzip => write!(f, "gzip"),
+            CompressionType::LZ4 => write!(f, "lz4"),
         }
     }
 }
@@ -77,7 +66,7 @@ struct Args {
     max_row_group_count: u16,
 
     /// Size of each row group
-    #[arg(short = 's', long = "size", default_value_t = 100000)]
+    #[arg(short = 's', long = "size", default_value_t = 1000000)]
     max_row_group_size: u32,
 
     /// jobs in parallel
@@ -95,6 +84,10 @@ struct Args {
     #[arg(short='c', long="compression", default_value_t = CompressionType::Zstd)]
     compression: CompressionType,
 
+    /// compression level
+    #[arg(short='l', long="level")]
+    level: Option<u8>,
+
     /// input parquet file path
     #[arg(short = 'i', long = "input")]
     file: String,
@@ -108,28 +101,38 @@ enum Message {
 fn main() {
     env_logger::init(); // controlled by env var RUST_LOG
     let args = Args::parse();
-    info!("hello, log");
 
+    // no output, just dump information
     if args.output.is_none() {
         dump_parquet_info(args.file.as_str());
         return;
+    } else {
+        summary_info(args.file.clone().as_str())
     }
+
+    if args.max_row_group_size == 0 {
+        error!("please set a value bigger than 0 for max_row_group_size");
+        return
+    }
+
+    let batch_size = 10000;
 
     let target_prefix = args.output.unwrap();
 
-    let file = File::open(args.file).unwrap();
+    let file = File::open(args.file.clone()).unwrap();
 
     let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
-    let mut total_rows = builder.metadata().file_metadata().num_rows() as u64;
+    let total_rows = builder.metadata().file_metadata().num_rows() as u64;
     let schema_desc = builder.schema().clone();
 
-    let mut reader = builder.with_batch_size(10000).build().unwrap();
+    let mut reader = builder.with_batch_size(batch_size).build().unwrap();
+
 
     let row_limit_per_file: u64 =
         (args.max_row_group_count as u32 * args.max_row_group_size) as u64;
     let total_tasks: u64 = match row_limit_per_file {
         0 => {
-            if total_rows < 10000 {
+            if total_rows < batch_size as u64 {
                 1
             } else {
                 args.jobs as u64
@@ -143,8 +146,8 @@ fn main() {
 
     let (thread_tx, thread_rx) = mpsc::channel::<i8>();
 
-    for i in 0..args.jobs {
-        thread_tx.send(0);
+    for _i in 0..args.jobs {
+        let _ = thread_tx.send(0);
     }
 
     let mut threads = vec![];
@@ -162,12 +165,16 @@ fn main() {
             // w1.write(&data).expect("Writing batch");
             // w2.write(&data).expect("Writing batch");
         }
-        for i in 0..total_tasks {
+        for _i in 0..total_tasks {
             tx.send(Message::DONE).unwrap();
         }
 
         //println!("send data done");
     });
+
+    println!("output files: {}_*.parquet", args.file.clone());
+    println!("\tmax row group size is {}", args.max_row_group_size);
+    println!("\ttotal {total_tasks} files will be created");
 
     for i in 0..total_tasks {
         let _ = thread_rx.recv();
@@ -177,7 +184,7 @@ fn main() {
         let outfile_name = format!("{target_prefix}_{i}.parquet");
 
         let t = thread::spawn(move || {
-            let mut w1 = build_parquet_file_writer2(outfile_name.as_str(), schema).unwrap();
+            let mut w1 = build_parquet_file_writer2(outfile_name.as_str(), schema, args.max_row_group_size as usize).unwrap();
 
             loop {
                 let msg = rx
@@ -189,21 +196,21 @@ fn main() {
                     Ok(msg_data) => match msg_data {
                         Message::CONTENT(data) => {
                             //println!("get data from {i}");
-                            w1.write(data.as_ref());
+                            let _ = w1.write(data.as_ref());
                         }
                         Message::DONE => {
-                            println!("thread for part {i} done");
+                            info!("thread for part {i} done");
                             break;
                         }
                     },
                     Err(_) => break,
                 }
             }
-            w1.flush();
+            let _ = w1.flush();
 
             // writer must be closed to write footer
             w1.close().unwrap();
-            local_thread_tx.send(0);
+            let _ = local_thread_tx.send(0);
         });
         threads.push(t);
     }
@@ -253,4 +260,25 @@ fn dump_parquet_info(file: &str) {
     println!("total number of rows: {}", file_meta.num_rows());
 
     //
+}
+
+fn summary_info(src: &str) {
+    let file = File::open(src).unwrap();
+    let parquet_reader = SerializedFileReader::new(file).unwrap();
+    let c = parquet_reader.num_row_groups();
+    let file_meta = parquet_reader.metadata().file_metadata();
+
+    println!(
+        "source file:\t{src}"
+    );
+    println!(
+        "\ttotal number of columns: {}",
+        file_meta.schema_descr().num_columns()
+    );
+
+    println!("\tnumber of row groups: {}", c);
+
+
+    println!("\ttotal number of rows: {}", file_meta.num_rows());
+
 }
