@@ -78,7 +78,7 @@ struct Args {
     output_dir: Option<String>,
 
     /// prefix
-    output: Option<String>,
+    prefix: Option<String>,
 
     /// compression method
     #[arg(short='c', long="compression", default_value_t = CompressionType::Zstd)]
@@ -103,7 +103,7 @@ fn main() {
     let args = Args::parse();
 
     // no output, just dump information
-    if args.output.is_none() {
+    if args.prefix.is_none() {
         dump_parquet_info(args.file.as_str());
         return;
     } else {
@@ -117,7 +117,7 @@ fn main() {
 
     let batch_size = 10000;
 
-    let target_prefix = args.output.unwrap();
+    let target_prefix = args.prefix.unwrap();
 
     let file = File::open(args.file.clone()).unwrap();
 
@@ -248,11 +248,12 @@ fn dump_parquet_info(file: &str) {
         println!("\tRow group {i} has {} rows", rg_metadata.num_rows());
         for i in 0..rg_metadata.columns().len() {
             println!(
-                "\t\tcolumn {i}: {} => {} by {}, encoding: {:?}",
+                "\t\tcolumn {i}: {} => {} by {}, encoding: {:?}, statics: {:?}",
                 rg_metadata.column(i).uncompressed_size(),
                 rg_metadata.column(i).compressed_size(),
                 rg_metadata.column(i).compression(),
-                rg_metadata.column(i).encodings()
+                rg_metadata.column(i).encodings(),
+                rg_metadata.column(i).statistics()
             );
         }
     }
