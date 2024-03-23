@@ -3,7 +3,6 @@ use clap::Parser;
 use datafusion::{dataframe::DataFrameWriteOptions, prelude::*};
 use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
 use datafusion::parquet::file::properties::{EnabledStatistics, WriterProperties, WriterVersion};
-use datafusion::parquet::schema::types::ColumnPath;
 use env_logger;
 use eyre::Result;
 
@@ -11,13 +10,16 @@ use eyre::Result;
 
 #[derive(Parser, Debug)]
 pub struct Args {
-    file: String,
+    #[arg(short)]
+    input: String,
+    #[arg(short, default_value = "output.parquet")]
+    output: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let df = run_df_sql_local(args.file.as_str())?;
+    let df = run_df_sql_local(args.input.as_str())?;
 
     let props = WriterProperties::builder()
         // file settings
@@ -29,23 +31,29 @@ async fn main() -> Result<()> {
         .set_created_by("pp".to_owned())
         // global column settings
         .set_encoding(Encoding::DELTA_BINARY_PACKED)
-        .set_column_encoding(
-            ColumnPath::from("ss_sold_date_sk"),
-            Encoding::DELTA_BINARY_PACKED,
-        )
-        .set_column_compression(
-            ColumnPath::from("ss_sold_date_sk"),
-            Compression::ZSTD(ZstdLevel::default()),
-        )
-        .set_compression(Compression::UNCOMPRESSED)
+        // .set_column_encoding(
+        //     ColumnPath::from("collect_time"),
+        //     Encoding::DELTA_BINARY_PACKED,
+        // )
+        // .set_column_compression(
+        //     ColumnPath::from("collect_time"),
+        //     Compression::ZSTD(ZstdLevel::default()),
+        // )
+        .set_compression(Compression::ZSTD(ZstdLevel::default()))
         .set_dictionary_enabled(false)
         .set_statistics_enabled(EnabledStatistics::Chunk)
         //.set_statistics_enabled(EnabledStatistics::None)
         .set_max_statistics_size(1024)
         .build();
 
-    df.write_parquet("output.parquet", DataFrameWriteOptions::new(), Some(props))
-        .await?;
+    df.write_parquet(
+        args.output.as_str(),
+        DataFrameWriteOptions::new()
+            .with_overwrite(false)
+            .with_single_file_output(false),
+        Some(props),
+    )
+    .await?;
 
     Ok(())
 }
@@ -67,7 +75,7 @@ fn run_df_sql_local(path: &str) -> Result<DataFrame> {
         ParquetReadOptions::default(),
     ))?;
 
-    match task::block_on(ctx.sql("SELECT *  FROM source_table order by 1 limit 86400")) {
+    match task::block_on(ctx.sql("SELECT *  FROM source_table order by 1")) {
         Ok(df) => Ok(df),
         Err(e) => Err(e.into()),
     }
