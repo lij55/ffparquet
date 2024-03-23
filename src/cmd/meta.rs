@@ -27,6 +27,7 @@ pub fn meta_main(args: Args) -> eyre::Result<()> {
     let c = parquet_reader.num_row_groups();
     let file_meta = parquet_reader.metadata().file_metadata();
 
+    println!("created by {}", file_meta.created_by().unwrap_or("unknown"));
     println!("total rows: {}", file_meta.num_rows());
     println!("total columns: {}", file_meta.schema_descr().num_columns());
     println!("total groups: {}", c);
@@ -51,7 +52,7 @@ pub fn meta_main(args: Args) -> eyre::Result<()> {
     for i in 0..c {
         let reader = parquet_reader.get_row_group(i).unwrap();
         let rg_metadata = reader.metadata();
-        match args.group.len() + args.column.len(){
+        match args.group.len() + args.column.len() {
             0 => {
                 println!(
                     "\tRow group {i} has {} rows, {} bytes , {} columns, sorting columns is {:?}",
@@ -82,7 +83,6 @@ pub fn meta_main(args: Args) -> eyre::Result<()> {
                                 rg_metadata.column(j).statistics()
                             );
                         }
-
                     }
                 }
             }
