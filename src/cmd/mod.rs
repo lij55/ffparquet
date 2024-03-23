@@ -1,5 +1,5 @@
 pub(crate) mod cat;
-mod merge;
+pub(crate) mod merge;
 pub(crate) mod meta;
-mod split;
+pub mod split;
 mod utils;

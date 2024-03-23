@@ -8,6 +8,8 @@ mod cmd;
 enum Commands {
     Cat(cmd::cat::Args),
     Meta(cmd::meta::Args),
+    Merge(cmd::merge::Args),
+    Split(cmd::split::Args),
 }
 
 #[derive(Parser, Debug)]
@@ -32,5 +34,7 @@ fn main() -> Result<()> {
     match args.command {
         Commands::Cat(args) => cmd::cat::cat_main(args),
         Commands::Meta(args) => cmd::meta::meta_main(args),
+        Commands::Merge(args) => cmd::merge::merge_main(args),
+        Commands::Split(args) => cmd::split::split_main(args),
     }
 }

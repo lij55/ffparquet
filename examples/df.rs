@@ -1,4 +1,5 @@
 use async_std::task;
+use clap::Parser;
 use datafusion::{dataframe::DataFrameWriteOptions, prelude::*};
 use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
 use datafusion::parquet::file::properties::{EnabledStatistics, WriterProperties, WriterVersion};
@@ -8,9 +9,15 @@ use eyre::Result;
 
 //use parquet::basic::Compression;
 
+#[derive(Parser, Debug)]
+pub struct Args {
+    file: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let df = run_df_sql_local()?;
+    let args = Args::parse();
+    let df = run_df_sql_local(args.file.as_str())?;
 
     let props = WriterProperties::builder()
         // file settings
@@ -37,17 +44,13 @@ async fn main() -> Result<()> {
         .set_max_statistics_size(1024)
         .build();
 
-    df.write_parquet(
-        "./datafusion-examples/test_parquet/test.parquet",
-        DataFrameWriteOptions::new(),
-        Some(props),
-    )
-    .await?;
+    df.write_parquet("output.parquet", DataFrameWriteOptions::new(), Some(props))
+        .await?;
 
     Ok(())
 }
 
-fn run_df_sql_local() -> Result<DataFrame> {
+fn run_df_sql_local(path: &str) -> Result<DataFrame> {
     let config = SessionConfig::new()
         .with_create_default_catalog_and_schema(true)
         .with_target_partitions(8)
@@ -59,12 +62,12 @@ fn run_df_sql_local() -> Result<DataFrame> {
     let ctx = SessionContext::new_with_config(config);
 
     task::block_on(ctx.register_parquet(
-        "hits",
-        &format!("store_sales.parquet"),
+        "source_table",
+        &format!("{path}"),
         ParquetReadOptions::default(),
     ))?;
 
-    match task::block_on(ctx.sql("SELECT *  FROM hits order by 1 limit 86400")) {
+    match task::block_on(ctx.sql("SELECT *  FROM source_table order by 1 limit 86400")) {
         Ok(df) => Ok(df),
         Err(e) => Err(e.into()),
     }

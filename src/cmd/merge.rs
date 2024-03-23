@@ -1,69 +1,95 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+// from https://raw.githubusercontent.com/apache/arrow-rs/master/parquet/src/bin/parquet-concat.rs
+
 use std::fs::File;
 use std::sync::Arc;
 
 use clap::Parser;
+use eyre::Report;
+use parquet::column::writer::ColumnCloseResult;
+use parquet::errors::ParquetError;
 use parquet::file::properties::WriterProperties;
-use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::file::writer::SerializedFileWriter;
-use parquet::schema::types::TypePtr;
 
-use crate::cmd::utils::*;
-
-#[derive(Parser, Debug)]
+#[derive(Debug, Parser)]
+#[clap(author, version)]
+/// Concatenates one or more parquet files
 pub struct Args {
-    #[arg(short, long)]
+    /// Path to output
     output: String,
 
-    file: Vec<String>,
+    /// Path to input files
+    input: Vec<String>,
 }
 
-fn build_parquet_file_writer2(path_str: &str, schema: TypePtr) -> SerializedFileWriter<File> {
+pub fn merge_main(args: Args) -> eyre::Result<()> {
+    if args.input.is_empty() {
+        return Err(Report::from(ParquetError::General(
+            "Must provide at least one input file".into(),
+        )));
+    }
 
-    let file = File::create(path_str).ok().unwrap();
-    let props = WriterProperties::builder().build();
-    let writer = SerializedFileWriter::new(file, schema, Arc::new(props))
-        .ok()
-        .unwrap();
-    writer
-}
+    let output = File::create(&args.output)?;
 
-pub fn merge_main(mut args: Args) -> eyre::Result<()> {
-    //let props = Default::default();
-    let mut writer = None;
+    let inputs = args
+        .input
+        .iter()
+        .map(|x| {
+            let reader = File::open(x).unwrap();
+            let metadata = parquet::file::footer::parse_metadata(&reader).unwrap();
+            (reader, metadata)
+        })
+        .collect::<Vec<_>>();
 
-    for file in args.file {
-        let file = open_file(file)?;
-        let reader = SerializedFileReader::new(file)?;
-
-        if writer.is_none() {
-            let schema = reader
-                .metadata()
-                .file_metadata()
-                .schema_descr_ptr()
-                .root_schema_ptr();
-
-            let props = WriterProperties::builder()
-                // .set_max_row_group_size(max_rows_per_group)
-                // .set_compression(Compression::ZSTD(ZstdLevel::default()))
-                // .set_created_by("pp".into())
-                // .set_statistics_enabled(EnabledStatistics::Chunk)
-                // .set_sorting_columns(Option::from(vec![sorts]))
-                .build();
-            writer = Some(build_parquet_file_writer2(args.output.as_str(), schema));
-        }
-
-        let mut writer = writer.as_mut().unwrap();
-
-        for rg_idx in 0..reader.num_row_groups() {
-            let rg = reader.get_row_group(rg_idx)?;
-
-            let mut row_group_writer = writer.next_row_group()?;
-
-            for col in rg.get_column_reader()
-
-            row_group_writer.close()?;
+    let expected = inputs[0].1.file_metadata().schema();
+    for (_, metadata) in inputs.iter().skip(1) {
+        let actual = metadata.file_metadata().schema();
+        if expected != actual {
+            return Err(Report::from(ParquetError::General(format!(
+                "inputs must have the same schema, {expected:#?} vs {actual:#?}"
+            ))));
         }
     }
+
+    let props = Arc::new(WriterProperties::builder().build());
+    let schema = inputs[0].1.file_metadata().schema_descr().root_schema_ptr();
+    let mut writer = SerializedFileWriter::new(output, schema, props)?;
+
+    for (input, metadata) in inputs {
+        for rg in metadata.row_groups() {
+            let mut rg_out = writer.next_row_group()?;
+            for column in rg.columns() {
+                let result = ColumnCloseResult {
+                    bytes_written: column.compressed_size() as _,
+                    rows_written: rg.num_rows() as _,
+                    metadata: column.clone(),
+                    bloom_filter: None,
+                    column_index: None,
+                    offset_index: None,
+                };
+                rg_out.append_column(&input, result)?;
+            }
+            rg_out.close()?;
+        }
+    }
+
+    writer.close()?;
 
     Ok(())
 }
