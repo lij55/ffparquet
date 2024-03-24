@@ -6,16 +6,21 @@ use parquet::file::reader::{FileReader, SerializedFileReader};
 use crate::cmd::utils::*;
 
 #[derive(Parser, Debug)]
+/// inspect metadata of a parquet file
 pub struct Args {
     #[arg(short, long)]
+    /// group id to inspect, multiple values, None means all
     group: Vec<i32>,
 
+    /// source file to read
     file: String,
 
     #[arg(short, long, default_value_t = false)]
+    /// show schema
     schema: bool,
 
     #[arg(short, long)]
+    /// columns to inspect, multiple values, None means all
     column: Vec<i32>,
 }
 

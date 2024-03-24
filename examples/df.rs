@@ -1,8 +1,9 @@
 use async_std::task;
 use clap::Parser;
-use datafusion::{dataframe::DataFrameWriteOptions, prelude::*};
 use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
 use datafusion::parquet::file::properties::{EnabledStatistics, WriterProperties, WriterVersion};
+use datafusion::parquet::schema::types::ColumnPath;
+use datafusion::{dataframe::DataFrameWriteOptions, prelude::*};
 use env_logger;
 use eyre::Result;
 
@@ -31,10 +32,18 @@ async fn main() -> Result<()> {
         .set_created_by("pp".to_owned())
         // global column settings
         .set_encoding(Encoding::DELTA_BINARY_PACKED)
-        // .set_column_encoding(
-        //     ColumnPath::from("collect_time"),
-        //     Encoding::DELTA_BINARY_PACKED,
-        // )
+        .set_column_encoding(
+            ColumnPath::from("collect_time"),
+            Encoding::DELTA_BINARY_PACKED,
+        )
+        .set_column_encoding(
+            ColumnPath::from("create_time"),
+            Encoding::DELTA_BINARY_PACKED,
+        )
+        .set_column_encoding(
+            ColumnPath::from("update_time"),
+            Encoding::DELTA_BINARY_PACKED,
+        )
         // .set_column_compression(
         //     ColumnPath::from("collect_time"),
         //     Compression::ZSTD(ZstdLevel::default()),

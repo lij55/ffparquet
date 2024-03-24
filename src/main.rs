@@ -10,13 +10,13 @@ enum Commands {
     Meta(cmd::meta::Args),
     Merge(cmd::merge::Args),
     Split(cmd::split::Args),
+    Df(cmd::df::Args),
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
 struct Args {
     /// Show debug output
-    #[arg(short, long)]
+    #[arg(short, long, help = "Show debug output")]
     verbose: bool,
 
     #[command(subcommand)]
@@ -36,5 +36,6 @@ fn main() -> Result<()> {
         Commands::Meta(args) => cmd::meta::meta_main(args),
         Commands::Merge(args) => cmd::merge::merge_main(args),
         Commands::Split(args) => cmd::split::split_main(args),
+        Commands::Df(args) => cmd::df::df_main(args),
     }
 }

@@ -11,22 +11,24 @@ enum OutputFormat {
 }
 
 #[derive(Parser, Debug)]
+/// cat the contents of a parquet file
 pub struct Args {
-    #[arg(short, long)]
+    #[arg(short, long, help = "group id to cat, None means all")]
     group: Option<usize>,
 
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(short, long, default_value_t = 0, help = "total rows to cat")]
     limit: u64,
 
     #[arg(short, long, default_value = "csv")]
     output: OutputFormat,
 
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, help = "offset in group to start cat")]
     offset: u64,
 
-    #[arg(short, long)]
+    #[arg(short, long, help = "columns to cat, multiple values, None means all")]
     column: Vec<i32>,
 
+    #[arg(help = "source file to read")]
     file: String,
 }
 

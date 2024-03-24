@@ -28,14 +28,14 @@ use parquet::file::properties::WriterProperties;
 use parquet::file::writer::SerializedFileWriter;
 
 #[derive(Debug, Parser)]
-#[clap(author, version)]
-/// Concatenates one or more parquet files
+/// split one parquet to multiple ones by row groups
 pub struct Args {
     /// Path to output
     #[clap(short, long)]
     output: String,
 
     #[clap(short, long, default_value_t = 4)]
+    /// Number of row groups in each output
     groups: u32,
 
     /// Path to input files

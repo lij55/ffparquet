@@ -1,0 +1,26 @@
+source:
+  - name: test
+    format: parquet
+    path:
+      - store_sales.parquet
+
+query:
+  - name: q1
+    sql: select * from test order by 1 limit 864000
+
+sink:
+  name: sink
+  format: parquet
+  path: sink.parquet
+  parameters:
+    max_group_size: 100000
+    compression: zstd
+    encoding: plain
+
+  columns:
+    - name: aa
+      compression: snappy
+      encoding: plain
+      sort: asc null last
+    - name: bb
+      compression: tt

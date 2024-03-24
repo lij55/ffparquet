@@ -28,8 +28,7 @@ use parquet::file::properties::WriterProperties;
 use parquet::file::writer::SerializedFileWriter;
 
 #[derive(Debug, Parser)]
-#[clap(author, version)]
-/// Concatenates one or more parquet files
+/// merge parquet files by row groups
 pub struct Args {
     /// Path to output
     output: String,
