@@ -1,14 +1,19 @@
 use std::collections::HashMap;
 use std::fs;
+use std::hash::Hash;
+
+use std::sync::Arc;
 
 use async_std::task;
 use clap::Parser;
+use datafusion::arrow::datatypes::{DataType, Field, FieldRef, SchemaBuilder, TimeUnit};
 use datafusion::dataframe::DataFrameWriteOptions;
 use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
 use datafusion::parquet::file::properties::{EnabledStatistics, WriterProperties, WriterVersion};
 use datafusion::parquet::schema::types::ColumnPath;
-use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
+use datafusion::prelude::{CsvReadOptions, ParquetReadOptions, SessionConfig, SessionContext};
 use log::{debug, info, warn};
+use parquet::schema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug)]
@@ -35,11 +40,43 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
 
     let ctx = SessionContext::new_with_config(config);
 
-    task::block_on(ctx.register_parquet(
-        cfg.source[0].name.as_str(),
-        &format!("{}", cfg.source[0].path[0]),
-        ParquetReadOptions::default(),
-    ))?;
+    for src in cfg.source {
+        match src.format.as_str() {
+            "parquet" => {
+                task::block_on(ctx.register_parquet(
+                    src.name.as_str(),
+                    &format!("{}", src.path[0]),
+                    ParquetReadOptions::default(),
+                ))?;
+            }
+            "csv" => {
+                let mut opt = CsvReadOptions::default();
+                let mut sbuilder = SchemaBuilder::new();
+
+
+                for col_def in src.schema {
+                    let f = build_fields(col_def);
+                    sbuilder.push(f);
+                }
+
+                let csv_schema = Arc::new(sbuilder.finish());
+
+                opt.schema = Option::from(csv_schema.as_ref());
+                //println!("{}","Int32".parse::<DataType>());
+
+                task::block_on(ctx.register_csv(
+                    src.name.as_str(),
+                    &format!("{}", src.path[0]),
+                    opt,
+                ))?;
+            }
+            v => {
+                warn!("unknown source format {v}, skipping")
+            }
+        }
+
+    }
+
 
     let df = task::block_on(ctx.sql(cfg.query[0].sql.as_str()))?;
 
@@ -132,6 +169,7 @@ struct Source {
     name: String,
     format: String,
     path: Vec<String>,
+    schema: Vec<HashMap<String, String>>
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct Sink {
@@ -184,4 +222,15 @@ fn get_compression(parameters: &HashMap<String, String>) -> Compression {
             Compression::ZSTD(ZstdLevel::default())
         }
     }
+}
+
+fn build_fields(col: HashMap<String, String>) -> Field {
+     let (name, datatype) = col.into_iter().next().unwrap();
+    let arrow_type = match datatype.as_str() {
+        "timestamp" => DataType::Timestamp(TimeUnit::Second, None),
+        "decimal" => DataType::Decimal128(20,10),
+        _ => DataType::Utf8,
+    };
+    Field::new(name, arrow_type, false)
+
 }
