@@ -3,6 +3,7 @@ source:
     format: csv
     path:
       - test.csv
+    header: false
     schema:
       - collect_time: timestamp
       - create_time: timestamp

@@ -1,19 +1,17 @@
 use std::collections::HashMap;
 use std::fs;
-use std::hash::Hash;
 
 use std::sync::Arc;
 
 use async_std::task;
 use clap::Parser;
-use datafusion::arrow::datatypes::{DataType, Field, FieldRef, SchemaBuilder, TimeUnit};
+use datafusion::arrow::datatypes::{DataType, Field, SchemaBuilder, TimeUnit};
 use datafusion::dataframe::DataFrameWriteOptions;
 use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
 use datafusion::parquet::file::properties::{EnabledStatistics, WriterProperties, WriterVersion};
 use datafusion::parquet::schema::types::ColumnPath;
 use datafusion::prelude::{CsvReadOptions, ParquetReadOptions, SessionConfig, SessionContext};
 use log::{debug, info, warn};
-use parquet::schema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug)]
@@ -53,6 +51,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
                 let mut opt = CsvReadOptions::default();
                 let mut sbuilder = SchemaBuilder::new();
 
+                opt.has_header = src.header.unwrap_or_else(|| false);
 
                 for col_def in src.schema {
                     let f = build_fields(col_def);
@@ -168,6 +167,7 @@ struct DFConfig {
 struct Source {
     name: String,
     format: String,
+    header: Option<bool>,
     path: Vec<String>,
     schema: Vec<HashMap<String, String>>
 }
@@ -227,7 +227,7 @@ fn get_compression(parameters: &HashMap<String, String>) -> Compression {
 fn build_fields(col: HashMap<String, String>) -> Field {
      let (name, datatype) = col.into_iter().next().unwrap();
     let arrow_type = match datatype.as_str() {
-        "timestamp" => DataType::Timestamp(TimeUnit::Second, None),
+        "timestamp" => DataType::Timestamp(TimeUnit::Millisecond, None),
         "decimal" => DataType::Decimal128(20,10),
         _ => DataType::Utf8,
     };
