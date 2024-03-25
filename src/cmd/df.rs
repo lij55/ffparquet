@@ -9,7 +9,10 @@ use datafusion::dataframe::DataFrameWriteOptions;
 use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
 use datafusion::parquet::file::properties::{EnabledStatistics, WriterProperties, WriterVersion};
 use datafusion::parquet::schema::types::ColumnPath;
-use datafusion::prelude::{CsvReadOptions, ParquetReadOptions, SessionConfig, SessionContext};
+use datafusion::prelude::{
+    AvroReadOptions, CsvReadOptions, NdJsonReadOptions, ParquetReadOptions, SessionConfig,
+    SessionContext,
+};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 
@@ -66,6 +69,20 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
                     src.name.as_str(),
                     &format!("{}", src.path[0]),
                     opt,
+                ))?;
+            }
+            "json" => {
+                task::block_on(ctx.register_json(
+                    src.name.as_str(),
+                    &format!("{}", src.path[0]),
+                    NdJsonReadOptions::default(),
+                ))?;
+            }
+            "avro" => {
+                task::block_on(ctx.register_avro(
+                    src.name.as_str(),
+                    &format!("{}", src.path[0]),
+                    AvroReadOptions::default(),
                 ))?;
             }
             v => {
@@ -127,7 +144,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
                 continue;
             }
         };
-        info!("{}", name);
+        // info!("{}", name);
         if cp.contains_key("compression") {
             let compression_type = get_compression(&cp);
             props = props.set_column_compression(ColumnPath::from(name), compression_type);
@@ -149,7 +166,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
             Some(props),
         ),
     )
-    .expect("TODO: panic message");
+    .expect(format!("writing parquet {} failed", cfg.sink.path).as_str());
 
     Ok(())
 }
