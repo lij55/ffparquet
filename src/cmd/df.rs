@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fs;
-
 use std::sync::Arc;
 
 use async_std::task;
@@ -73,9 +72,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
                 warn!("unknown source format {v}, skipping")
             }
         }
-
     }
-
 
     let df = task::block_on(ctx.sql(cfg.query[0].sql.as_str()))?;
 
@@ -169,7 +166,7 @@ struct Source {
     format: String,
     header: Option<bool>,
     path: Vec<String>,
-    schema: Vec<HashMap<String, String>>
+    schema: Vec<HashMap<String, String>>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct Sink {
@@ -225,12 +222,50 @@ fn get_compression(parameters: &HashMap<String, String>) -> Compression {
 }
 
 fn build_fields(col: HashMap<String, String>) -> Field {
-     let (name, datatype) = col.into_iter().next().unwrap();
+    let (name, datatype) = col.into_iter().next().unwrap();
     let arrow_type = match datatype.as_str() {
         "timestamp" => DataType::Timestamp(TimeUnit::Millisecond, None),
-        "decimal" => DataType::Decimal128(20,10),
+        "decimal" => DataType::Decimal128(20, 10),
         _ => DataType::Utf8,
     };
     Field::new(name, arrow_type, false)
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_compression() {
+        let mut parameters = HashMap::new();
+        parameters.insert("compression".to_owned(), "zstd".to_owned());
+        assert_eq!(
+            get_compression(&parameters),
+            Compression::ZSTD(ZstdLevel::default())
+        );
+    }
+
+    #[test]
+    fn test_get_compression_bad_value() {
+        let mut parameters = HashMap::new();
+        parameters.insert("compression".to_owned(), "bad".to_owned());
+        assert_eq!(
+            get_compression(&parameters),
+            Compression::ZSTD(ZstdLevel::default())
+        )
+    }
+
+    #[test]
+    fn test_get_encoding() {
+        let mut parameters = HashMap::new();
+        parameters.insert("encoding".to_owned(), "PLAIN".to_owned());
+        assert_eq!(get_encoding(&parameters), Encoding::PLAIN);
+    }
+
+    #[test]
+    fn test_get_encoding_bad_value() {
+        let mut parameters = HashMap::new();
+        parameters.insert("encoding".to_owned(), "bad".to_owned());
+        assert_eq!(get_encoding(&parameters), Encoding::PLAIN)
+    }
 }
