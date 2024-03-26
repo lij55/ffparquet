@@ -23,6 +23,15 @@ use url::Url;
 pub struct Args {
     #[arg(short, help = "Path to config file")]
     config: String,
+
+    #[arg(long, help = "query name to run")]
+    query: Option<String>,
+
+    #[arg(long, help = "source file")]
+    source: Option<String>,
+
+    #[arg(long, help = "target file")]
+    sink: Option<String>,
 }
 
 pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
@@ -42,11 +51,16 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
 
     let ctx = SessionContext::new_with_config(config);
 
-    for src in cfg.source {
+    for (idx, src) in cfg.source.iter().enumerate() {
+        let source_name = match idx {
+            0 => args.source.clone().unwrap_or_else(|| src.path[0].clone()),
+            _ => src.path[0].clone(),
+        };
+
         match src.format.as_str() {
             "parquet" => {
                 task::block_on(ctx.register_parquet(
-                    src.name.as_str(),
+                    source_name.as_str(),
                     &format!("{}", src.path[0]),
                     ParquetReadOptions::default(),
                 ))?;
@@ -57,7 +71,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
 
                 opt.has_header = src.header.unwrap_or_else(|| false);
 
-                for col_def in src.schema {
+                for col_def in &src.schema {
                     let f = build_fields(col_def);
                     sbuilder.push(f);
                 }
@@ -68,21 +82,21 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
                 //println!("{}","Int32".parse::<DataType>());
 
                 task::block_on(ctx.register_csv(
-                    src.name.as_str(),
+                    source_name.as_str(),
                     &format!("{}", src.path[0]),
                     opt,
                 ))?;
             }
             "json" => {
                 task::block_on(ctx.register_json(
-                    src.name.as_str(),
+                    source_name.as_str(),
                     &format!("{}", src.path[0]),
                     NdJsonReadOptions::default(),
                 ))?;
             }
             "avro" => {
                 task::block_on(ctx.register_avro(
-                    src.name.as_str(),
+                    source_name.as_str(),
                     &format!("{}", src.path[0]),
                     AvroReadOptions::default(),
                 ))?;
@@ -173,9 +187,12 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
         .register_object_store(&s3_url, Arc::new(s3));
 
     let df = task::block_on(ctx.sql(cfg.query[0].sql.as_str()))?;
+
+    let target_name = args.sink.unwrap_or_else(|| cfg.sink.path.clone());
+
     task::block_on(
         df.write_parquet(
-            cfg.sink.path.as_str(),
+            target_name.as_str(),
             DataFrameWriteOptions::new()
                 .with_overwrite(false)
                 .with_single_file_output(true),
@@ -255,7 +272,7 @@ fn get_compression(parameters: &HashMap<String, String>) -> Compression {
     }
 }
 
-fn build_fields(col: HashMap<String, String>) -> Field {
+fn build_fields(col: &HashMap<String, String>) -> Field {
     let (name, datatype) = col.into_iter().next().unwrap();
     let arrow_type = match datatype.as_str() {
         "timestamp" => DataType::Timestamp(TimeUnit::Millisecond, None),
