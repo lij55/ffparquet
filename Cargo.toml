@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 log = "0.4"
-env_logger = "0.9.0"
+env_logger = "0.11"
 parquet = { version = "51.0.0", features = ["cli"] }
 arrow = { version = "51.0.0", features = ["chrono-tz"] }
 arrow-array = "51.0.0"
@@ -18,5 +18,7 @@ datafusion = { version = "36.0.0", features = ["serde"] }
 datafusion-common = "36.0.0"
 tokio = { version = "1.36.0", features = ["full"] }
 async-std = { version = "1", features = ["attributes", "tokio1"] }
-serde = { version = "1.0.137", features = ["derive"] }
+serde = { version = "1.0.197", features = ["derive"] }
 serde_yaml = "0.9"
+url = "2.5.0"
+object_store = { version = "0.9.1", features = ["aws"] }

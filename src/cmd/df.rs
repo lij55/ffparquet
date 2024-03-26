@@ -14,7 +14,9 @@ use datafusion::prelude::{
     SessionContext,
 };
 use log::{debug, info, warn};
+use object_store::aws::AmazonS3Builder;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 #[derive(Parser, Debug)]
 /// run sql with datafusion and write the result to a parquet file
@@ -91,8 +93,6 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
         }
     }
 
-    let df = task::block_on(ctx.sql(cfg.query[0].sql.as_str()))?;
-
     let mut props = WriterProperties::builder()
         // file settings
         .set_writer_version(WriterVersion::PARQUET_2_0)
@@ -157,6 +157,22 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
 
     let props = props.build();
 
+    let bucket_name = "testdata";
+    let s3 = AmazonS3Builder::new()
+        .with_allow_http(true)
+        .with_bucket_name(bucket_name)
+        .with_region("test")
+        .with_access_key_id("minioadmin")
+        .with_secret_access_key("minioadmin")
+        .with_endpoint("http://127.0.0.1:9000")
+        .build()?;
+
+    let path = format!("s3://{bucket_name}");
+    let s3_url = Url::parse(&path).unwrap();
+    ctx.runtime_env()
+        .register_object_store(&s3_url, Arc::new(s3));
+
+    let df = task::block_on(ctx.sql(cfg.query[0].sql.as_str()))?;
     task::block_on(
         df.write_parquet(
             cfg.sink.path.as_str(),
@@ -192,6 +208,7 @@ struct Sink {
     path: String,
     parameters: HashMap<String, String>,
     columns: Vec<HashMap<String, String>>,
+    s3: HashMap<String, String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct Query {

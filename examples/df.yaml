@@ -512,15 +512,25 @@ source:
 query:
   - name: q1
     sql: select * from test;
+  - name: q2
+    sql: select * from test limit 3;
+  - name: default
+    sql: select 1
 
 sink:
   name: sink
   format: parquet
-  path: sink.parquet
+  path: s3://testdata/sink.parquet
   parameters:
     max_group_size: 86400
     compression: zstd
     encoding: plain
+  s3:
+    bucket: testdata
+    region: none
+    access_id: minioadmin
+    secret_key: minioadmin
+
 
   columns:
     - name: collect_time
