@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_std::task;
@@ -13,7 +14,7 @@ use datafusion::prelude::{
     AvroReadOptions, CsvReadOptions, NdJsonReadOptions, ParquetReadOptions, SessionConfig,
     SessionContext,
 };
-use eyre::Error;
+use eyre::{Error, OptionExt};
 use log::{debug, info, warn};
 use object_store::aws::AmazonS3Builder;
 use serde::{Deserialize, Serialize};
@@ -25,10 +26,11 @@ pub struct Args {
     #[arg(short, help = "Path to config file")]
     config: String,
 
-    #[arg(long, help = "query name to run")]
+    #[arg(long)]
+    /// query name to run, default is 'default'
     query: Option<String>,
 
-    #[arg(short, long, help = "source file")]
+    #[arg(short, long, help = "source file to replace in config file")]
     source: Vec<String>,
 
     #[arg(long, help = "target file")]
@@ -105,11 +107,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
                 opt.schema = Option::from(csv_schema.as_ref());
                 //println!("{}","Int32".parse::<DataType>());
 
-                task::block_on(ctx.register_csv(
-                    src.name.as_str(),
-                    &format!("{}", path),
-                    opt,
-                ))?;
+                task::block_on(ctx.register_csv(src.name.as_str(), &format!("{}", path), opt))?;
             }
             "json" => {
                 task::block_on(ctx.register_json(
@@ -144,15 +142,9 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
     if file_parameters.contains_key("statistic") {
         let enable_statistic = file_parameters.get("statistic").unwrap().to_lowercase();
         props = match enable_statistic.as_str() {
-            "false" => {
-                props.set_statistics_enabled(EnabledStatistics::None)
-            }
-            "true" => {
-                props.set_statistics_enabled(EnabledStatistics::Chunk)
-            }
-            _ => {
-                props
-            }
+            "false" => props.set_statistics_enabled(EnabledStatistics::None),
+            "true" => props.set_statistics_enabled(EnabledStatistics::Chunk),
+            _ => props,
         }
     }
 
@@ -207,38 +199,54 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
         if cp.contains_key("statistic") {
             let enable_statistic = cp.get("statistic").unwrap().to_lowercase();
             // info!("for sttics {}, {}", name, enable_statistic);
-            props = match enable_statistic.as_str() {
+            match enable_statistic.as_str() {
                 "false" => {
-                    props.set_column_statistics_enabled(ColumnPath::from(name), EnabledStatistics::None)
+                    props = props.set_column_statistics_enabled(
+                        ColumnPath::from(name),
+                        EnabledStatistics::None,
+                    )
                 }
                 "true" => {
-                    props.set_column_statistics_enabled(ColumnPath::from(name), EnabledStatistics::Chunk)
+                    props = props.set_column_statistics_enabled(
+                        ColumnPath::from(name),
+                        EnabledStatistics::Chunk,
+                    )
                 }
                 _ => {
-                    props
+                    warn!("unknown statistic type {}, skip", enable_statistic);
                 }
             }
         }
     }
 
-    let props = props.build();
+    if cfg.sink.format == "s3" {
+        let s3cfg = cfg.sink.s3.ok_or_eyre("s3 format without config")?;
+        let bucket_name = s3cfg.get("bucket").ok_or_eyre(Error::msg("no buucket"))?;
+        let region = s3cfg.get("region").ok_or_eyre(Error::msg("no region"))?;
+        let key_id = s3cfg
+            .get("access_id")
+            .ok_or_eyre(Error::msg("no access_id"))?;
+        let secret_key = s3cfg
+            .get("secret_key")
+            .ok_or_eyre(Error::msg("no secret_key"))?;
+        let endpoint = s3cfg
+            .get("endpoint")
+            .ok_or_eyre(Error::msg("no endpoint"))?;
 
-    // TODO: register s3 sink
-    let bucket_name = "testdata";
-    let s3 = AmazonS3Builder::new()
-        .with_allow_http(true)
-        .with_bucket_name(bucket_name)
-        .with_region("test")
-        .with_access_key_id("minioadmin")
-        .with_secret_access_key("minioadmin")
-        .with_endpoint("http://127.0.0.1:9000")
-        .build()?;
+        let s3 = AmazonS3Builder::new()
+            .with_allow_http(true)
+            .with_bucket_name(bucket_name)
+            .with_region(region)
+            .with_access_key_id(key_id)
+            .with_secret_access_key(secret_key)
+            .with_endpoint(endpoint)
+            .build()?;
 
-    let path = format!("s3://{bucket_name}");
-    let s3_url = Url::parse(&path).unwrap();
-    ctx.runtime_env()
-        .register_object_store(&s3_url, Arc::new(s3));
-
+        let path = format!("s3://{bucket_name}");
+        let s3_url = Url::parse(&path).unwrap();
+        ctx.runtime_env()
+            .register_object_store(&s3_url, Arc::new(s3));
+    }
     // query search order: cmd, default
     let query_name = args.query.unwrap_or_else(|| format!("default"));
 
@@ -247,6 +255,8 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
     let df = task::block_on(ctx.sql(query.as_str()))?;
 
     let target_name = args.sink.unwrap_or_else(|| cfg.sink.path.clone());
+
+    let props = props.build();
 
     task::block_on(
         df.write_parquet(
@@ -257,7 +267,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
             Some(props),
         ),
     )
-        .expect(format!("writing parquet {} failed", cfg.sink.path).as_str());
+    .expect(format!("writing parquet {} failed", target_name).as_str());
 
     Ok(())
 }
@@ -280,7 +290,6 @@ struct Source {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Sink {
-    name: String,
     format: String,
     path: String,
     parameters: HashMap<String, String>,
@@ -289,42 +298,29 @@ struct Sink {
 }
 
 fn get_encoding(parameters: &HashMap<String, String>) -> Encoding {
-    match parameters.get("encoding").unwrap().to_uppercase().as_str() {
-        "PLAIN" => Encoding::PLAIN,
-        "PLAIN_DICTIONARY" => Encoding::PLAIN_DICTIONARY,
-        "RLE" => Encoding::RLE,
-        "DELTA_BINARY_PACKED" => Encoding::DELTA_BINARY_PACKED,
-        "DELTA_BYTE_ARRAY" => Encoding::DELTA_BYTE_ARRAY,
-        "DELTA_LENGTH_BYTE_ARRAY" => Encoding::DELTA_LENGTH_BYTE_ARRAY,
-        _ => {
-            warn!(
-                "invalid encoding: {}, use PLAIN by default",
-                parameters.get("encoding").unwrap()
-            );
-            Encoding::PLAIN
-        }
-    }
+    let encoding = match parameters.get("encoding") {
+        Some(v) => String::from(v).to_uppercase(),
+        None => String::from("PLAIN"),
+    };
+    Encoding::from_str(encoding.as_str()).unwrap_or_else(|_| {
+        warn!("unknown encoding type: {}, use PLAIN by default", encoding);
+        Encoding::PLAIN
+    })
 }
 
 fn get_compression(parameters: &HashMap<String, String>) -> Compression {
-    match parameters
-        .get("compression")
-        .unwrap()
-        .to_uppercase()
-        .as_str()
-    {
-        "ZSTD" => Compression::ZSTD(ZstdLevel::default()),
-        "SNAPPY" => Compression::SNAPPY,
-        "UNCOMPRESSED" => Compression::UNCOMPRESSED,
-        "LZ4" => Compression::LZ4,
-        _ => {
-            warn!(
-                "unknown compression type: {}, use ZSTD by default",
-                parameters.get("compression").unwrap()
-            );
-            Compression::ZSTD(ZstdLevel::default())
-        }
-    }
+    let compression = match parameters.get("compression") {
+        Some(v) => String::from(v).to_uppercase(),
+        None => String::from("ZSTD"),
+    };
+
+    Compression::from_str(compression.as_str()).unwrap_or_else(|_| {
+        warn!(
+            "unknown compression type: {}, use ZSTD by default",
+            compression
+        );
+        Compression::ZSTD(ZstdLevel::default())
+    })
 }
 
 fn build_fields(col: &HashMap<String, String>) -> Field {

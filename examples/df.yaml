@@ -515,12 +515,11 @@ query:
   q2: select 1
 
 sink:
-  name: sink
   format: parquet
   path: s3://testdata/sink.parquet
   parameters:
     max_group_size: 86400
-    compression: zstd
+    compression: ZSTD(3)
     encoding: plain
     statistic: false
 
@@ -529,6 +528,7 @@ sink:
     region: none
     access_id: minioadmin
     secret_key: minioadmin
+    endpoint: http://127.0.0.1:9000
 
 
   columns:
