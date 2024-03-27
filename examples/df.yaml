@@ -510,12 +510,9 @@ source:
       - dp_0500: decimal
 
 query:
-  - name: default
-    sql: select * from test
-  - name: q2
-    sql: select * from test limit 3;
-  - name: q1
-    sql: select 1
+  default: select * from test
+  q1: select * from test limit 3;
+  q2: select 1
 
 sink:
   name: sink

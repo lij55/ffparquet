@@ -13,6 +13,7 @@ use datafusion::prelude::{
     AvroReadOptions, CsvReadOptions, NdJsonReadOptions, ParquetReadOptions, SessionConfig,
     SessionContext,
 };
+use eyre::Error;
 use log::{debug, info, warn};
 use object_store::aws::AmazonS3Builder;
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,21 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
     let cfg: DFConfig = serde_yaml::from_str::<DFConfig>(&contents)?;
 
     debug!("{:?}", cfg);
+
+    if cfg.query.len() == 0 {
+        //error!("no sql query provided");
+        return Err(Error::msg("no sql query provided"));
+    }
+
+    if args.query.is_some() {
+        if !cfg.query.contains_key(args.query.clone().unwrap().as_str()) {
+            return Err(Error::msg("query not found in config"));
+        }
+    } else {
+        if !cfg.query.contains_key("default") {
+            return Err(Error::msg("no default query config nor arguments"));
+        }
+    }
 
     let config = SessionConfig::new()
         .with_create_default_catalog_and_schema(true)
@@ -186,7 +202,12 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
     ctx.runtime_env()
         .register_object_store(&s3_url, Arc::new(s3));
 
-    let df = task::block_on(ctx.sql(cfg.query[0].sql.as_str()))?;
+    // query search order: cmd, default
+    let query_name = args.query.unwrap_or_else(|| format!("default"));
+
+    let query = cfg.query.get(query_name.as_str()).unwrap();
+
+    let df = task::block_on(ctx.sql(query.as_str()))?;
 
     let target_name = args.sink.unwrap_or_else(|| cfg.sink.path.clone());
 
@@ -208,7 +229,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
 struct DFConfig {
     source: Vec<Source>,
     sink: Sink,
-    query: Vec<Query>,
+    query: HashMap<String, String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct Source {
