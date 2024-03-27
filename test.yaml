@@ -1,8 +1,7 @@
 source:
   - name: test
     format: parquet
-    path:
-      - /home/liyang/1010_0_0.parquet
+    path: /home/liyang/1010_0_0.parquet
 
 query:
   default: select * from test
