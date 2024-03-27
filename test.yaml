@@ -1,0 +1,34 @@
+source:
+  - name: test
+    format: parquet
+    path:
+      - /home/liyang/1010_0_0.parquet
+
+query:
+  default: select * from test
+  q1: select * from test limit 3;
+  q2: select 1
+
+sink:
+  name: sink
+  format: parquet
+  path: 1010_0_0_new.parquet
+  parameters:
+    max_group_size: 86400
+    compression: zstd
+    encoding: DELTA_BYTE_ARRAY
+    statistic: false
+
+  columns:
+    - name: collect_time
+      compression: snappy
+      encoding: DELTA_BINARY_PACKED
+      statistic: true
+    - name: create_time
+      compression: snappy
+      encoding: DELTA_BINARY_PACKED
+      statistic: true
+    - name: update_time
+      compression: snappy
+      encoding: DELTA_BINARY_PACKED
+      statistic: true

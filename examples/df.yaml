@@ -522,6 +522,8 @@ sink:
     max_group_size: 86400
     compression: zstd
     encoding: plain
+    statistic: false
+
   s3:
     bucket: testdata
     region: none
@@ -533,9 +535,12 @@ sink:
     - name: collect_time
       compression: snappy
       encoding: DELTA_BINARY_PACKED
+      statistic: true
     - name: create_time
       compression: snappy
       encoding: DELTA_BINARY_PACKED
+      statistic: true
     - name: update_time
       compression: snappy
       encoding: DELTA_BINARY_PACKED
+      statistic: true

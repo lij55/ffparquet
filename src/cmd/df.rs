@@ -68,16 +68,17 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
     let ctx = SessionContext::new_with_config(config);
 
     for (idx, src) in cfg.source.iter().enumerate() {
-        let source_name = match idx {
+        let path_name = match idx {
             0 => args.source.clone().unwrap_or_else(|| src.path[0].clone()),
             _ => src.path[0].clone(),
         };
 
         match src.format.as_str() {
             "parquet" => {
+                info!("reginster parquet {}", src.name.as_str());
                 task::block_on(ctx.register_parquet(
-                    source_name.as_str(),
-                    &format!("{}", src.path[0]),
+                    src.name.as_str(),
+                    &format!("{}", path_name),
                     ParquetReadOptions::default(),
                 ))?;
             }
@@ -86,9 +87,10 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
                 let mut sbuilder = SchemaBuilder::new();
 
                 opt.has_header = src.header.unwrap_or_else(|| false);
+                let schema = src.schema.clone().unwrap_or_default();
 
-                for col_def in &src.schema {
-                    let f = build_fields(col_def);
+                for col_def in schema {
+                    let f = build_fields(&col_def);
                     sbuilder.push(f);
                 }
 
@@ -98,22 +100,22 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
                 //println!("{}","Int32".parse::<DataType>());
 
                 task::block_on(ctx.register_csv(
-                    source_name.as_str(),
-                    &format!("{}", src.path[0]),
+                    src.name.as_str(),
+                    &format!("{}", path_name),
                     opt,
                 ))?;
             }
             "json" => {
                 task::block_on(ctx.register_json(
-                    source_name.as_str(),
-                    &format!("{}", src.path[0]),
+                    src.name.as_str(),
+                    &format!("{}", path_name),
                     NdJsonReadOptions::default(),
                 ))?;
             }
             "avro" => {
                 task::block_on(ctx.register_avro(
-                    source_name.as_str(),
-                    &format!("{}", src.path[0]),
+                    src.name.as_str(),
+                    &format!("{}", path_name),
                     AvroReadOptions::default(),
                 ))?;
             }
@@ -129,11 +131,26 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
         .set_created_by("pp".to_owned())
         .set_write_batch_size(16 * 1024 * 1024)
         .set_dictionary_enabled(false)
-        .set_statistics_enabled(EnabledStatistics::Chunk)
+        //.set_statistics_enabled(EnabledStatistics::Chunk)
         //.set_statistics_enabled(EnabledStatistics::None)
         .set_max_statistics_size(1024);
 
     let file_parameters = cfg.sink.parameters;
+
+    if file_parameters.contains_key("statistic") {
+        let enable_statistic = file_parameters.get("statistic").unwrap().to_lowercase();
+        props = match enable_statistic.as_str() {
+            "false" => {
+                props.set_statistics_enabled(EnabledStatistics::None)
+            }
+            "true" => {
+                props.set_statistics_enabled(EnabledStatistics::Chunk)
+            }
+            _ => {
+                props
+            }
+        }
+    }
 
     if file_parameters.contains_key("max_group_size") {
         let grout_size = match file_parameters
@@ -175,6 +192,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
             }
         };
         // info!("{}", name);
+        info!("for {cp:?}" );
         if cp.contains_key("compression") {
             let compression_type = get_compression(&cp);
             props = props.set_column_compression(ColumnPath::from(name), compression_type);
@@ -182,6 +200,21 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
         if cp.contains_key("encoding") {
             let encoding_type = get_encoding(&cp);
             props = props.set_column_encoding(ColumnPath::from(name), encoding_type);
+        }
+        if cp.contains_key("statistic") {
+            let enable_statistic = cp.get("statistic").unwrap().to_lowercase();
+            info!("for sttics {}, {}", name, enable_statistic);
+            props = match enable_statistic.as_str() {
+                "false" => {
+                    props.set_column_statistics_enabled(ColumnPath::from(name), EnabledStatistics::None)
+                }
+                "true" => {
+                    props.set_column_statistics_enabled(ColumnPath::from(name), EnabledStatistics::Chunk)
+                }
+                _ => {
+                    props
+                }
+            }
         }
     }
 
@@ -220,7 +253,7 @@ pub(crate) fn df_main(args: Args) -> eyre::Result<()> {
             Some(props),
         ),
     )
-    .expect(format!("writing parquet {} failed", cfg.sink.path).as_str());
+        .expect(format!("writing parquet {} failed", cfg.sink.path).as_str());
 
     Ok(())
 }
@@ -231,14 +264,16 @@ struct DFConfig {
     sink: Sink,
     query: HashMap<String, String>,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Source {
     name: String,
     format: String,
     header: Option<bool>,
     path: Vec<String>,
-    schema: Vec<HashMap<String, String>>,
+    schema: Option<Vec<HashMap<String, String>>>,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Sink {
     name: String,
@@ -246,8 +281,9 @@ struct Sink {
     path: String,
     parameters: HashMap<String, String>,
     columns: Vec<HashMap<String, String>>,
-    s3: HashMap<String, String>,
+    s3: Option<HashMap<String, String>>,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Query {
     name: String,
