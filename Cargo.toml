@@ -22,3 +22,6 @@ serde = { version = "1.0.197", features = ["derive"] }
 serde_yaml = "0.9"
 url = "2.5.0"
 object_store = { version = "0.9.1", features = ["aws"] }
+arrow-csv = { version = "51.0.0"}
+arrow-schema = "51.0.0"
+rust-s3 = { version = "0.32.3",features = ["sync"], default-features = false }
