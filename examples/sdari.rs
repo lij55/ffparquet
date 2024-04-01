@@ -6,12 +6,14 @@ use std::sync::Arc;
 use arrow_csv::ReaderBuilder;
 use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use clap::Parser;
+use eyre::Result;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, Encoding, ZstdLevel};
 use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use parquet::schema::types::ColumnPath;
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
+use s3::error::S3Error;
 use s3::Region;
 
 #[derive(Parser, Debug)]
@@ -22,18 +24,54 @@ pub struct Args {
     col: Option<i32>,
 }
 
-fn main() {
+fn main() -> Result<()> {
     let bucket_name = "testdata";
     let region = Region::Custom {
         region: "".into(),
         endpoint: "http://localhost:9000".into(),
     };
-    let credentials = Credentials::from_env().unwrap();
-    let bucket = Bucket::new(bucket_name, region, credentials).unwrap().with_path_style();
-    let mut path = "path";
-    let result = bucket.list("".into(), None).unwrap();
-    for i in result {
-        println!("{i:?}")
+    let credentials = Credentials::from_env()?;
+    let bucket = Bucket::new(bucket_name, region, credentials)
+        .unwrap()
+        .with_path_style();
+
+    println!("{}", key_existed(&bucket, "aa")?);
+
+    println!("{}", key_existed(&bucket, "sink.parquet")?);
+
+    bucket.delete_object("sink.parquet")?;
+
+    Ok(())
+}
+
+fn key_existed(bucket: &Bucket, prefix: &str) -> Result<bool, S3Error> {
+    let result = bucket.list(prefix.into(), None)?;
+
+    Ok(result.into_iter().map(|r| r.contents.len()).sum::<usize>() > 0)
+}
+
+fn delete_prefix(bucket: &Bucket, prefix: &str) -> Result<bool, S3Error> {
+    let results = bucket.list(prefix.into(), None)?;
+    for contents in results.into_iter().map(|r| r.contents).collect::<Vec<_>>() {
+        for content in contents {
+            match bucket.delete_object(content.key.clone()) {
+                Ok(_) => {
+                    println!("done {}", content.key);
+                }
+                Err(e) => println!("{:?}", e),
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn rename_object(bucket: &Bucket, old_key: &str, new_key: &str) -> Result<bool, S3Error> {
+    match bucket.copy_object_internal(&old_key, &new_key) {
+        Ok(_) => match bucket.delete_object(old_key) {
+            Ok(_) => Ok(true),
+            Err(e) => Err(e),
+        },
+        Err(e) => Err(e),
     }
 }
 
@@ -131,7 +169,9 @@ fn s3_upload() {
         endpoint: "http://localhost:9000".into(),
     };
     let credentials = Credentials::from_env().unwrap();
-    let bucket = Bucket::new(bucket_name, region, credentials).unwrap().with_path_style();
+    let bucket = Bucket::new(bucket_name, region, credentials)
+        .unwrap()
+        .with_path_style();
     let mut path = "path";
     let test: Vec<u8> = (0..1000).map(|_| 42).collect();
     let mut file = open_file("test.parquet").unwrap();
