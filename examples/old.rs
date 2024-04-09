@@ -1,11 +1,11 @@
+use std::{sync::Arc, sync::mpsc, sync::Mutex, thread};
 use std::env;
 use std::fmt::Display;
-use std::fs::{read, File};
+use std::fs::{File, read};
 use std::io;
 use std::ops::{Deref, Index};
 use std::path::Path;
 use std::time::Duration;
-use std::{sync::mpsc, sync::Arc, sync::Mutex, thread};
 
 use arrow::datatypes::SchemaRef;
 use arrow_array::{RecordBatch, RecordBatchReader};
@@ -96,7 +96,7 @@ struct Args {
     sorting: i32,
 
     /// compression method
-    #[arg(short='c', long="compression", default_value_t = CompressionType::Zstd)]
+    #[arg(short = 'c', long = "compression", default_value_t = CompressionType::Zstd)]
     compression: CompressionType,
 
     /// compression level
@@ -132,7 +132,7 @@ fn detect_file_format(path: &str) -> FileFormat {
     }
 }
 
-fn main2() -> Result<()> {
+fn main() -> Result<()> {
     env_logger::init(); // controlled by env var RUST_LOG
     let args = Args::parse();
 
@@ -230,7 +230,7 @@ fn main2() -> Result<()> {
                 args.sorting,
                 args.max_row_group_size as usize,
             )
-            .unwrap();
+                .unwrap();
 
             loop {
                 match rx.lock().expect(ERR_LOCK).recv() {
