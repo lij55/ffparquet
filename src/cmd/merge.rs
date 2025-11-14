@@ -51,7 +51,7 @@ pub fn merge_main(args: Args) -> eyre::Result<()> {
         .iter()
         .map(|x| {
             let reader = File::open(x).unwrap();
-            let metadata = parquet::file::footer::parse_metadata(&reader).unwrap();
+            let metadata = None
             (reader, metadata)
         })
         .collect::<Vec<_>>();

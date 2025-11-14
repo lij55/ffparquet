@@ -144,7 +144,7 @@ fn build_parquet_file_writer2(path_str: &str, schema: SchemaRef) -> Option<Arrow
         .set_encoding(Encoding::DELTA_BYTE_ARRAY)
         .set_write_batch_size(16 * 1024 * 1024)
         .set_dictionary_enabled(false)
-        .set_max_statistics_size(1024)
+        //.set_max_statistics_size(1024)
         .set_column_encoding(
             ColumnPath::from("collect_time"),
             Encoding::DELTA_BINARY_PACKED,

@@ -1,9 +1,8 @@
+use crate::cmd::utils::*;
 use clap::Parser;
 #[allow(unused_imports)]
 use log::{debug, error, info, warn};
 use parquet::file::reader::{FileReader, SerializedFileReader};
-
-use crate::cmd::utils::*;
 
 #[derive(Parser, Debug)]
 /// inspect metadata of a parquet file
@@ -80,11 +79,15 @@ pub fn meta_main(args: Args) -> eyre::Result<()> {
                     for j in 0..rg_metadata.columns().len() {
                         if col_sets.is_empty() || col_sets.contains(&(j as i32)) {
                             println!(
-                                "\t\tcolumn {j}: {} => {} by {}, encoding: {:?}, statics: {:?}",
+                                "\t\tcolumn {j}: {} => {} by {}, {:?}, statics: {:?}",
                                 rg_metadata.column(j).uncompressed_size(),
                                 rg_metadata.column(j).compressed_size(),
                                 rg_metadata.column(j).compression(),
-                                rg_metadata.column(j).encodings(),
+                                rg_metadata
+                                    .column(j)
+                                    .encodings()
+                                    .map(|x| x)
+                                    .collect::<Vec<_>>(),
                                 rg_metadata.column(j).statistics()
                             );
                         }
