@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 log = "0.4.28"
 env_logger = "0.11.8"
-parquet = { version = "57.0.0", features = ["cli"] }
+parquet = { version = "56.2.0", features = ["cli"] }
 arrow = { version = "57.0.0", features = ["chrono-tz"] }
 arrow-array = "57.0.0"
 clap = { version = "4.5.51", features = ["derive"] }

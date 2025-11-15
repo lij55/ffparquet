@@ -86,7 +86,7 @@ pub fn meta_main(args: Args) -> eyre::Result<()> {
                                 rg_metadata
                                     .column(j)
                                     .encodings()
-                                    .map(|x| x)
+                                    .into_iter().map(|x| x)
                                     .collect::<Vec<_>>(),
                                 rg_metadata.column(j).statistics()
                             );

@@ -25,6 +25,7 @@ use eyre::Report;
 use parquet::column::writer::ColumnCloseResult;
 use parquet::errors::ParquetError;
 use parquet::file::properties::WriterProperties;
+use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::file::writer::SerializedFileWriter;
 
 #[derive(Debug, Parser)]
@@ -50,9 +51,10 @@ pub fn merge_main(args: Args) -> eyre::Result<()> {
         .input
         .iter()
         .map(|x| {
-            let reader = File::open(x).unwrap();
-            let metadata = None
-            (reader, metadata)
+            let file = File::open(x).unwrap();
+            let reader = SerializedFileReader::new(file).unwrap();
+            let metadata = reader.metadata().clone();
+            (x.clone(), metadata)
         })
         .collect::<Vec<_>>();
 
@@ -70,7 +72,8 @@ pub fn merge_main(args: Args) -> eyre::Result<()> {
     let schema = inputs[0].1.file_metadata().schema_descr().root_schema_ptr();
     let mut writer = SerializedFileWriter::new(output, schema, props)?;
 
-    for (input, metadata) in inputs {
+    for (path, metadata) in inputs {
+        let mut file = File::open(path).unwrap();
         for rg in metadata.row_groups() {
             let mut rg_out = writer.next_row_group()?;
             for column in rg.columns() {
@@ -82,7 +85,7 @@ pub fn merge_main(args: Args) -> eyre::Result<()> {
                     column_index: None,
                     offset_index: None,
                 };
-                rg_out.append_column(&input, result)?;
+                rg_out.append_column(&mut file, result)?;
             }
             rg_out.close()?;
         }
