@@ -10,6 +10,7 @@ enum Commands {
     Meta(cmd::meta::Args),
     Merge(cmd::merge::Args),
     Split(cmd::split::Args),
+    Tr(cmd::tr::Args),
     // Df(cmd::df::Args),
 }
 
@@ -36,6 +37,7 @@ fn main() -> Result<()> {
         Commands::Meta(args) => cmd::meta::meta_main(args),
         Commands::Merge(args) => cmd::merge::merge_main(args),
         Commands::Split(args) => cmd::split::split_main(args),
+        Commands::Tr(args) => cmd::tr::run(args),
         // Commands::Df(args) => cmd::df::df_main(args),
     }
 }

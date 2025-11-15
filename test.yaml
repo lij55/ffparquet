@@ -1,33 +1,41 @@
 source:
   - name: test
     format: parquet
-    path: /home/liyang/1010_0_0.parquet
-
-query:
-  default: select * from test
-  q1: select * from test limit 3;
-  q2: select 1
-
+    path: 86l.pf
 sink:
   name: sink
   format: parquet
-  path: 1010_0_0_new.parquet
+  path: rtcm.parquet
   parameters:
-    max_group_size: 86400
+    max_group_size: 10000
     compression: zstd
-    encoding: DELTA_BYTE_ARRAY
+    encoding: plain
     statistic: false
 
   columns:
-    - name: collect_time
-      compression: snappy
-      encoding: DELTA_BINARY_PACKED
-      statistic: true
-    - name: create_time
-      compression: snappy
-      encoding: DELTA_BINARY_PACKED
-      statistic: true
-    - name: update_time
-      compression: snappy
-      encoding: DELTA_BINARY_PACKED
-      statistic: true
+    - name: vrs_id
+      encoding: delta_binary_packed
+      statistic: false
+      compression: none
+      dictionary: true
+    - name: epoch
+      encoding: delta_binary_packed
+    - name: sys
+      dictionary: true
+    - name: sat_id
+    - name: sig_id
+    - name: df397
+    - name: df398
+    - name: df400
+      encoding: delta_binary_packed
+    - name: df401
+      encoding: delta_binary_packed
+    - name: doppler
+      dictionary: true
+      compression: none
+    - name: cno
+      dictionary: true
+    - name: lock
+      dictionary: true
+    - name: valid
+      encoding: rle
