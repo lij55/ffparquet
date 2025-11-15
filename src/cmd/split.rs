@@ -24,6 +24,7 @@ use clap::Parser;
 use eyre::Report;
 use parquet::column::writer::ColumnCloseResult;
 use parquet::errors::ParquetError;
+use parquet::file::metadata::ParquetMetaDataReader;
 use parquet::file::properties::WriterProperties;
 use parquet::file::writer::SerializedFileWriter;
 
@@ -50,7 +51,9 @@ pub fn split_main(args: Args) -> eyre::Result<()> {
     }
 
     let reader = File::open(args.input).unwrap();
-    let metadata = parquet::file::footer::parse_metadata(&reader).unwrap();
+    let metadata = ParquetMetaDataReader::new()
+        .parse_and_finish(&reader)
+        .unwrap();
 
     let props = Arc::new(WriterProperties::builder().build());
     let schema = metadata.file_metadata().schema_descr().root_schema_ptr();
