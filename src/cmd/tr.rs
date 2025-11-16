@@ -1,7 +1,10 @@
 use std::fs::File;
 use std::io::Read;
-use std::sync::Arc;
 
+use arrow::array::RecordBatch;
+use arrow::compute::{
+    concat_batches, lexsort_to_indices, take, SortColumn, SortOptions, TakeOptions,
+};
 use clap::Parser;
 use eyre::Result;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -37,6 +40,7 @@ pub struct Sink {
     pub path: String,
     pub parameters: Parameters,
     pub columns: Vec<Column>,
+    pub order: Option<Vec<OrderColumn>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,11 +59,17 @@ pub struct Column {
     pub dictionary: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct OrderColumn {
+    pub name: String,
+    pub descending: Option<bool>,
+}
+
 fn get_compression(compression: &str) -> Compression {
     match compression {
         "snappy" => Compression::SNAPPY,
         "zstd" => Compression::ZSTD(ZstdLevel::try_new(20).unwrap()),
-        "gzip" => Compression::GZIP(GzipLevel::default()),
+        "gzip" => Compression::GZIP(GzipLevel::try_new(6).unwrap()),
         "brotli" => Compression::BROTLI(BrotliLevel::default()),
         "lz4" => Compression::LZ4_RAW,
         _ => Compression::UNCOMPRESSED,
@@ -92,12 +102,16 @@ pub fn run(args: Args) -> Result<()> {
     file.read_to_string(&mut contents)?;
 
     let config: Config = serde_yaml::from_str(&contents)?;
-
     // --- Reader ---
     let source_file = open_file(&config.source[0].path)?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(source_file)?;
     let schema = builder.schema().clone();
-    let mut reader = builder.build()?;
+    let reader = builder.build()?;
+
+    let mut batches = vec![];
+    for batch in reader {
+        batches.push(batch?);
+    }
 
     // --- Writer ---
     let sink_file = File::create(&config.sink.path)?;
@@ -106,6 +120,18 @@ pub fn run(args: Args) -> Result<()> {
         .set_compression(get_compression(&config.sink.parameters.compression))
         .set_encoding(get_encoding(&config.sink.parameters.encoding))
         .set_statistics_enabled(get_statistics(config.sink.parameters.statistic));
+
+    if let Some(order_columns) = &config.sink.order {
+        let sorting_columns = order_columns
+            .iter()
+            .map(|c| {
+                let column_index = schema.index_of(&c.name).unwrap();
+                let descending = c.descending.unwrap_or(false);
+                parquet::format::SortingColumn::new(column_index as i32, descending, false)
+            })
+            .collect::<Vec<_>>();
+        props_builder = props_builder.set_sorting_columns(Some(sorting_columns));
+    }
 
     for column in &config.sink.columns {
         let compression = column
@@ -127,11 +153,37 @@ pub fn run(args: Args) -> Result<()> {
             .set_column_statistics_enabled(path, get_statistics(statistic));
     }
     let props = props_builder.build();
-    let mut writer = ArrowWriter::try_new(sink_file, schema, Some(props))?;
+    let mut writer = ArrowWriter::try_new(sink_file, schema.clone(), Some(props))?;
 
     // --- Transcode record batch by record batch ---
-    for batch in reader {
-        writer.write(&batch?)?;
+    if let Some(order_columns) = &config.sink.order {
+        let batch = concat_batches(&schema, &batches)?;
+        let sort_columns = order_columns
+            .iter()
+            .map(|c| {
+                let descending = c.descending.unwrap_or(false);
+                SortColumn {
+                    values: batch.column_by_name(&c.name).unwrap().clone(),
+                    options: Some(SortOptions {
+                        descending,
+                        nulls_first: false,
+                    }),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let indices = lexsort_to_indices(&sort_columns, None)?;
+        let sorted_columns = batch
+            .columns()
+            .iter()
+            .map(|c| take(c, &indices, Some(TakeOptions::default())))
+            .collect::<Result<Vec<_>, _>>()?;
+        let sorted_batch = RecordBatch::try_new(schema.clone(), sorted_columns)?;
+        writer.write(&sorted_batch)?;
+    } else {
+        for batch in batches {
+            writer.write(&batch)?;
+        }
     }
 
     writer.close()?;
